@@ -1,12 +1,16 @@
 {
   "name": "@barissozudogru/gha-secrets-audit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Audit GitHub Actions workflows for secret hygiene",
+  "type": "module",
   "bin": {
     "gha-secrets-audit": "./dist/cli.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build"

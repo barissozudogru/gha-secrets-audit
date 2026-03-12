@@ -4,17 +4,18 @@ import {
   AuditOptions,
   AuditResult,
   DuplicateGroup,
+  IfConditionWarning,
   OverExposedSecret,
   SecretMap,
   SecretReference,
 } from './types.js';
 
+// Matches secrets.FOO or secrets['FOO'] only inside ${{ ... }} expressions
+// The caller filters lines to ensure context is appropriate.
 const SECRET_DOT_PATTERN = /secrets\.([A-Z_][A-Z0-9_]*)/g;
 const SECRET_BRACKET_PATTERN = /secrets\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g;
 const SECRET_DOT_PATTERN_LOWER = /secrets\.([a-z_][a-z0-9_A-Z]*)/g;
 const SECRET_BRACKET_PATTERN_LOWER = /secrets\[['"]([a-z_][a-z0-9_A-Z]*)['"]\]/g;
-
-const OVER_EXPOSURE_JOB_THRESHOLD = 3;
 
 function globWorkflowFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) {
@@ -26,7 +27,11 @@ function globWorkflowFiles(dir: string): string[] {
     .map((e) => path.join(dir, e.name));
 }
 
-function extractSecretsFromLine(line: string): string[] {
+/**
+ * Extract secret names from a string segment that has already been confirmed
+ * to be within an expression context (e.g. inside ${{ ... }} or an env: block value).
+ */
+function extractSecretsFromSegment(segment: string): string[] {
   const found: string[] = [];
   const patterns = [
     SECRET_DOT_PATTERN,
@@ -37,7 +42,7 @@ function extractSecretsFromLine(line: string): string[] {
   for (const pattern of patterns) {
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
-    while ((match = pattern.exec(line)) !== null) {
+    while ((match = pattern.exec(segment)) !== null) {
       if (match[1]) {
         found.push(match[1]);
       }
@@ -46,29 +51,101 @@ function extractSecretsFromLine(line: string): string[] {
   return [...new Set(found)];
 }
 
-function parseWorkflowFile(filePath: string): { secretMap: SecretMap } {
+/**
+ * Extract all ${{ ... }} expression bodies from a line.
+ */
+function extractExpressionBodies(line: string): string[] {
+  const bodies: string[] = [];
+  const exprPattern = /\$\{\{([\s\S]*?)\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = exprPattern.exec(line)) !== null) {
+    bodies.push(m[1]);
+  }
+  return bodies;
+}
+
+/**
+ * Return secret names referenced on a line, but only from valid contexts:
+ *   1. Inside ${{ ... }} expressions (covers env:, with:, run:, if:, etc.)
+ *   2. The right-hand side of an env-block assignment (YAML value after `KEY:`)
+ *      but only when the value itself contains secrets.XXX — which will still
+ *      need a ${{ }} wrapper per GHA syntax, so rule 1 covers it.
+ *
+ * This prevents false positives from:
+ *   - Comments (# secrets.FOO)
+ *   - echo/run statements that just print the name as a string
+ *   - Documentation lines inside YAML
+ */
+function extractSecretsFromLine(line: string): string[] {
+  // Skip comment lines entirely
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('#')) {
+    return [];
+  }
+
+  const secrets: string[] = [];
+
+  // Only collect secrets found inside ${{ }} expression bodies
+  for (const body of extractExpressionBodies(line)) {
+    secrets.push(...extractSecretsFromSegment(body));
+  }
+
+  return [...new Set(secrets)];
+}
+
+interface ParseResult {
+  secretMap: SecretMap;
+  ifConditionWarnings: IfConditionWarning[];
+}
+
+function parseWorkflowFile(filePath: string): ParseResult {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const secretMap: SecretMap = {};
+  const ifConditionWarnings: IfConditionWarning[] = [];
 
   let currentJob = 'unknown';
   let currentStep = 'unknown';
   let stepIndex = 0;
 
-  const jobPattern = /^  ([a-zA-Z0-9_-]+):\s*$/;
+  // Track whether we are inside the top-level `jobs:` block.
+  // A line at indent-0 that is NOT `jobs:` resets back to a different top-level key.
+  let insideJobsBlock = false;
+
+  // A job-ID line is exactly 2-space indent followed by an identifier and colon,
+  // with no other content — and we must already be inside the jobs: block.
+  const topLevelKeyPattern = /^([a-zA-Z0-9_-]+):\s*$/;
+  const jobIdPattern = /^  ([a-zA-Z0-9_-]+):\s*$/;
   const stepNamePattern = /^\s+-?\s*name:\s*(.+)$/;
   const stepRunPattern = /^\s+-?\s*run:/;
   const stepUsesPattern = /^\s+-?\s*uses:/;
+  const ifConditionPattern = /^\s+if:\s*(.+)$/;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineNumber = i + 1;
 
-    const jobMatch = jobPattern.exec(line);
-    if (jobMatch) {
-      currentJob = jobMatch[1];
-      stepIndex = 0;
-      currentStep = 'unknown';
+    // Detect top-level YAML keys (zero indentation)
+    const topLevelMatch = topLevelKeyPattern.exec(line);
+    if (topLevelMatch) {
+      insideJobsBlock = topLevelMatch[1] === 'jobs';
+      // Reset job/step tracking when leaving the jobs block
+      if (!insideJobsBlock) {
+        currentJob = 'unknown';
+        currentStep = 'unknown';
+        stepIndex = 0;
+      }
+      continue;
+    }
+
+    // Only match job IDs when inside the jobs: block
+    if (insideJobsBlock) {
+      const jobMatch = jobIdPattern.exec(line);
+      if (jobMatch) {
+        currentJob = jobMatch[1];
+        stepIndex = 0;
+        currentStep = 'unknown';
+      }
     }
 
     const stepNameMatch = stepNamePattern.exec(line);
@@ -77,6 +154,27 @@ function parseWorkflowFile(filePath: string): { secretMap: SecretMap } {
     } else if (stepRunPattern.test(line) || stepUsesPattern.test(line)) {
       stepIndex++;
       currentStep = `step-${stepIndex}`;
+    }
+
+    // Detect secrets used in if: conditions — these values appear in GitHub logs
+    const ifMatch = ifConditionPattern.exec(line);
+    if (ifMatch) {
+      const condition = ifMatch[1].trim();
+      const bodies = extractExpressionBodies(condition);
+      // If no ${{ }}, the condition may still reference context directly (bare expression)
+      const segmentsToCheck = bodies.length > 0 ? bodies : [condition];
+      for (const seg of segmentsToCheck) {
+        const secretsInCond = extractSecretsFromSegment(seg);
+        for (const name of secretsInCond) {
+          ifConditionWarnings.push({
+            secretName: name,
+            file: filePath,
+            job: currentJob,
+            line: lineNumber,
+            condition,
+          });
+        }
+      }
     }
 
     const secrets = extractSecretsFromLine(line);
@@ -99,7 +197,7 @@ function parseWorkflowFile(filePath: string): { secretMap: SecretMap } {
     }
   }
 
-  return { secretMap };
+  return { secretMap, ifConditionWarnings };
 }
 
 function mergeSecretMaps(maps: SecretMap[]): SecretMap {
@@ -115,7 +213,10 @@ function mergeSecretMaps(maps: SecretMap[]): SecretMap {
   return merged;
 }
 
-function detectOverExposedSecrets(secretMap: SecretMap): OverExposedSecret[] {
+function detectOverExposedSecrets(
+  secretMap: SecretMap,
+  threshold: number
+): OverExposedSecret[] {
   const overExposed: OverExposedSecret[] = [];
 
   for (const [name, usage] of Object.entries(secretMap)) {
@@ -124,7 +225,7 @@ function detectOverExposedSecrets(secretMap: SecretMap): OverExposedSecret[] {
     const uniqueJobs = new Set(usage.references.map((r) => `${r.file}::${r.job}`));
     const uniqueFiles = new Set(usage.references.map((r) => r.file));
 
-    if (uniqueJobs.size >= OVER_EXPOSURE_JOB_THRESHOLD) {
+    if (uniqueJobs.size >= threshold) {
       overExposed.push({
         name,
         jobCount: uniqueJobs.size,
@@ -175,7 +276,7 @@ function detectDuplicateGroups(secretMap: SecretMap): DuplicateGroup[] {
     }
   }
 
-  // Also detect Levenshtein-like near-duplicates by prefix matching for short names
+  // Also detect near-duplicates by prefix matching for short names
   for (let i = 0; i < names.length; i++) {
     for (let j = i + 1; j < names.length; j++) {
       const a = names[i].toUpperCase();
@@ -201,6 +302,10 @@ function detectDuplicateGroups(secretMap: SecretMap): DuplicateGroup[] {
 
 export function auditWorkflows(options: AuditOptions): AuditResult {
   const files = globWorkflowFiles(options.workflowsDir);
+  const threshold = options.overExposureThreshold;
+  const excludeSet = new Set(
+    (options.excludeSecrets ?? []).map((s) => s.toUpperCase())
+  );
 
   if (files.length === 0) {
     return {
@@ -210,6 +315,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
       overExposedSecrets: [],
       duplicateGroups: [],
       githubTokenUsages: [],
+      ifConditionWarnings: [],
       totalUniqueSecrets: 0,
       totalReferences: 0,
       summary: {
@@ -218,20 +324,38 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
         overExposedCount: 0,
         duplicateGroupCount: 0,
         githubTokenCount: 0,
+        ifConditionWarningCount: 0,
         recommendations: ['No workflow files found. Ensure the path points to a .github/workflows directory.'],
       },
     };
   }
 
-  const perFileMaps = files.map((f) => parseWorkflowFile(f).secretMap);
-  const secretMap = mergeSecretMaps(perFileMaps);
+  const perFileResults = files.map((f) => parseWorkflowFile(f));
+  const perFileMaps = perFileResults.map((r) => r.secretMap);
+  const allIfWarnings = perFileResults.flatMap((r) => r.ifConditionWarnings);
 
-  const overExposedSecrets = detectOverExposedSecrets(secretMap);
+  let secretMap = mergeSecretMaps(perFileMaps);
+
+  // Apply exclusions
+  if (excludeSet.size > 0) {
+    for (const key of Object.keys(secretMap)) {
+      if (excludeSet.has(key.toUpperCase())) {
+        delete secretMap[key];
+      }
+    }
+  }
+
+  const overExposedSecrets = detectOverExposedSecrets(secretMap, threshold);
   const duplicateGroups = detectDuplicateGroups(secretMap);
 
   const githubTokenUsages = Object.values(secretMap)
     .filter((u) => u.isGithubToken)
     .flatMap((u) => u.references);
+
+  // Filter if-condition warnings to excluded secrets
+  const ifConditionWarnings = allIfWarnings.filter(
+    (w) => !excludeSet.has(w.secretName.toUpperCase())
+  );
 
   const totalReferences = Object.values(secretMap).reduce(
     (sum, u) => sum + u.references.length,
@@ -249,6 +373,12 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
   if (duplicateGroups.length > 0) {
     recommendations.push(
       `Investigate ${duplicateGroups.length} potential duplicate secret group(s) to reduce credential sprawl.`
+    );
+  }
+
+  if (ifConditionWarnings.length > 0) {
+    recommendations.push(
+      `${ifConditionWarnings.length} secret(s) used in "if:" conditions — these values may be exposed in GitHub Actions logs.`
     );
   }
 
@@ -273,6 +403,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
     overExposedSecrets,
     duplicateGroups,
     githubTokenUsages,
+    ifConditionWarnings,
     totalUniqueSecrets: Object.keys(secretMap).length,
     totalReferences,
     summary: {
@@ -281,6 +412,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
       overExposedCount: overExposedSecrets.length,
       duplicateGroupCount: duplicateGroups.length,
       githubTokenCount: githubTokenUsages.length,
+      ifConditionWarningCount: ifConditionWarnings.length,
       recommendations,
     },
   };

@@ -1,0 +1,40 @@
+{
+  "name": "@barissozudogru/gha-secrets-audit",
+  "version": "0.1.0",
+  "description": "Audit GitHub Actions workflows for secret hygiene",
+  "bin": {
+    "gha-secrets-audit": "./dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/barissozudogru/gha-secrets-audit.git"
+  },
+  "keywords": [
+    "github-actions",
+    "secrets",
+    "security",
+    "audit",
+    "devsecops",
+    "cli"
+  ],
+  "author": "Baris Sozudogru",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}

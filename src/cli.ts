@@ -16,15 +16,9 @@ function c(code: string): string {
 const RESET  = c('\x1b[0m');
 const BOLD   = c('\x1b[1m');
 const DIM    = c('\x1b[2m');
-const RED    = c('\x1b[31m');
 const GREEN  = c('\x1b[32m');
 const YELLOW = c('\x1b[33m');
 const CYAN   = c('\x1b[36m');
-const WHITE  = c('\x1b[37m');
-
-// Suppress unused-variable warnings — these are kept for future use
-void RED;
-void WHITE;
 
 function getVersion(): string {
   try {

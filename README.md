@@ -40,6 +40,15 @@ gha-secrets-audit --strict
 
 # Combine flags
 gha-secrets-audit --path ./workflows --json --strict
+
+# Raise the over-exposure threshold to 5 jobs
+gha-secrets-audit --threshold 5
+
+# Exclude specific secrets from all findings
+gha-secrets-audit --exclude GITHUB_TOKEN,NPM_TOKEN
+
+# Combine threshold and exclusions with strict mode
+gha-secrets-audit --threshold 5 --exclude GITHUB_TOKEN --strict
 ```
 
 ## Options
@@ -48,9 +57,19 @@ gha-secrets-audit --path ./workflows --json --strict
 |------|-------|-------------|
 | `--path <dir>` | `-p` | Custom workflows directory (default: `.github/workflows`) |
 | `--json` | | Output results as JSON |
-| `--strict` | | Exit 1 on any finding (over-exposed or duplicate) |
+| `--strict` | | Exit 1 on any finding (over-exposed, duplicate, or if-condition) |
+| `--threshold <n>` | `-t` | Number of jobs a secret must appear in before it is flagged as over-exposed (default: `3`) |
+| `--exclude <names>` | `-e` | Comma-separated list of secret names to omit from all findings |
 | `--version` | `-v` | Print version |
 | `--help` | `-h` | Show help |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Scan completed — no issues found, or `--strict` not set |
+| `1` | `--strict` is set and at least one finding was detected (over-exposed secret, duplicate group, or if-condition warning) |
+| `1` | Fatal error (unreadable path, invalid arguments, etc.) |
 
 ## Example output
 

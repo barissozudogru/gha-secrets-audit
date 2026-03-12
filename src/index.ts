@@ -10,12 +10,10 @@ import {
   SecretReference,
 } from './types.js';
 
-// Matches secrets.FOO or secrets['FOO'] only inside ${{ ... }} expressions
-// The caller filters lines to ensure context is appropriate.
-const SECRET_DOT_PATTERN = /secrets\.([A-Z_][A-Z0-9_]*)/g;
-const SECRET_BRACKET_PATTERN = /secrets\[['"]([A-Z_][A-Z0-9_]*)['"]\]/g;
-const SECRET_DOT_PATTERN_LOWER = /secrets\.([a-z_][a-z0-9_A-Z]*)/g;
-const SECRET_BRACKET_PATTERN_LOWER = /secrets\[['"]([a-z_][a-z0-9_A-Z]*)['"]\]/g;
+// Matches secrets.FOO or secrets['FOO'] / secrets["FOO"] only inside ${{ ... }} expressions.
+// Supports any valid identifier: UPPER_CASE, lower_camel, PascalCase, mixed.
+const SECRET_DOT_PATTERN = /secrets\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+const SECRET_BRACKET_PATTERN = /secrets\[['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\]/g;
 
 function globWorkflowFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) {
@@ -36,8 +34,6 @@ function extractSecretsFromSegment(segment: string): string[] {
   const patterns = [
     SECRET_DOT_PATTERN,
     SECRET_BRACKET_PATTERN,
-    SECRET_DOT_PATTERN_LOWER,
-    SECRET_BRACKET_PATTERN_LOWER,
   ];
   for (const pattern of patterns) {
     pattern.lastIndex = 0;

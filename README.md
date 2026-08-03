@@ -1,17 +1,7 @@
-<h1 align="center">gha-secrets-audit</h1>
+# gha-secrets-audit
 
-<p align="center">
-  Find exposed, unused, and mismanaged secrets in your GitHub Actions workflows.
-</p>
+Static analysis tool for GitHub Actions workflow files to inspect secret usage and detect hygiene issues. It runs entirely offline without reading secret values or making network calls.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js >= 18">
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat" alt="MIT License">
-  <img src="https://img.shields.io/badge/Zero_Dependencies-brightgreen?style=flat" alt="Zero Dependencies">
-</p>
-
----
 
 ## What It Does
 

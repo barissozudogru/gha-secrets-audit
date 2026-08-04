@@ -1,33 +1,7 @@
-<h1 align="center">gha-secrets-audit</h1>
+# gha-secrets-audit
 
-<p align="center">
-  Find exposed, unused, and mismanaged secrets in your GitHub Actions workflows.
-</p>
+Static analysis tool for GitHub Actions workflow files to inspect secret usage and detect hygiene issues. It runs entirely offline without reading secret values or making network calls.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js >= 18">
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat" alt="MIT License">
-  <img src="https://img.shields.io/badge/Zero_Dependencies-brightgreen?style=flat" alt="Zero Dependencies">
-</p>
-
----
-
-## What It Does
-
-`gha-secrets-audit` is a zero-dependency CLI that performs static analysis of your `.github/workflows` YAML files. It maps every secret reference to the exact file, job, step, and line number — then flags patterns that violate least-privilege or create security risk.
-
-No network access. No API calls. No secret values are read or transmitted.
-
-## What It Detects
-
-**Over-exposed secrets** — secrets referenced across too many jobs, violating least-privilege. A secret used in 3+ jobs (configurable) is flagged with a breakdown of where it appears.
-
-**If-condition leaks** — secrets referenced inside `if:` conditions are evaluated and their resolved values appear in GitHub Actions workflow logs, making them visible to anyone with log access.
-
-**Cross-workflow secret mapping** — every secret reference is mapped across all workflow files with its file, job, step, and line number so you can see the full blast radius of each credential.
-
-**Hygiene issues** — duplicate or near-duplicate secret names that suggest credential sprawl, inconsistent naming conventions, or overlooked consolidation opportunities.
 
 ## Quick Start
 
@@ -38,6 +12,15 @@ npx @barissozudogru/gha-secrets-audit
 # Or install globally
 npm install -g @barissozudogru/gha-secrets-audit
 ```
+
+## Detection Rules
+
+The scanner maps every secret reference across workflow files by file, job, step, and line number, checking for:
+
+- **Over-exposed secrets**: Credentials referenced in 3 or more jobs (configurable via `--threshold`), violating least-privilege design.
+- **If-condition leaks**: Secrets referenced inside `if:` conditions, which GitHub Actions evaluates and prints in workflow execution logs.
+- **Duplicate secret patterns**: Near-duplicate or base-name matched secret names that suggest credential duplication or inconsistent naming conventions.
+
 
 ## Usage
 
@@ -177,7 +160,7 @@ To exclude known-acceptable secrets from the check:
 |------|-----------|
 | `0` | Scan completed successfully with no findings, or `--strict` was not set |
 | `1` | `--strict` is set and at least one finding was detected (over-exposed secret, duplicate group, or if-condition warning) |
-| `1` | Fatal error — unreadable path, invalid argument, or filesystem failure |
+| `1` | Fatal error: unreadable path, invalid argument, or filesystem failure |
 
 ## License
 

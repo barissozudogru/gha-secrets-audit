@@ -152,6 +152,8 @@ function parseWorkflowFile(filePath: string): ParseResult {
       currentStep = `step-${stepIndex}`;
     }
 
+    const secrets = extractSecretsFromLine(line);
+
     // Detect secrets used in if: conditions — these values appear in GitHub logs
     const ifMatch = ifConditionPattern.exec(line);
     if (ifMatch) {
@@ -169,12 +171,15 @@ function parseWorkflowFile(filePath: string): ParseResult {
             line: lineNumber,
             condition,
           });
+          secrets.push(name);
         }
       }
     }
 
-    const secrets = extractSecretsFromLine(line);
-    for (const secretName of secrets) {
+    // Deduplicate in case a secret was found in both paths
+    const uniqueSecrets = [...new Set(secrets)];
+
+    for (const secretName of uniqueSecrets) {
       const ref: SecretReference = {
         file: filePath,
         job: currentJob,

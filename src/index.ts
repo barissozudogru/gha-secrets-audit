@@ -65,7 +65,7 @@ function extractExpressionBodies(line: string): string[] {
  * Return secret names referenced on a line, but only from valid contexts:
  *   1. Inside ${{ ... }} expressions (covers env:, with:, run:, if:, etc.)
  *   2. The right-hand side of an env-block assignment (YAML value after `KEY:`)
- *      but only when the value itself contains secrets.XXX — which will still
+ *      but only when the value itself contains secrets.XXX - which will still
  *      need a ${{ }} wrapper per GHA syntax, so rule 1 covers it.
  *
  * This prevents false positives from:
@@ -116,7 +116,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
   let insideJobsBlock = false;
 
   // A job-ID line is exactly 2-space indent followed by an identifier and colon,
-  // with no other content — and we must already be inside the jobs: block.
+  // with no other content - and we must already be inside the jobs: block.
   const topLevelKeyPattern = /^([a-zA-Z0-9_-]+):\s*$/;
   const jobIdPattern = /^  ([a-zA-Z0-9_-]+):\s*$/;
   const stepNamePattern = /^\s+-?\s*name:\s*(.+)$/;
@@ -205,7 +205,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
       }
     }
 
-    // Detect secrets used in if: conditions — these values appear in GitHub logs
+    // Detect secrets used in if: conditions - these values appear in GitHub logs
     const ifMatch = ifConditionPattern.exec(line);
     if (ifMatch) {
       const condition = ifMatch[1].trim();

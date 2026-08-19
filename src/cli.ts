@@ -199,7 +199,7 @@ function renderIfConditionWarnings(warnings: IfConditionWarning[]): void {
 
   for (const w of warnings) {
     console.log(`  ${YELLOW}${BOLD}${w.secretName}${RESET}`);
-    console.log(`  ${DIM}${path.basename(w.file)} — job: ${w.job}, line ${w.line}${RESET}`);
+    console.log(`  ${DIM}${path.basename(w.file)} - job: ${w.job}, line ${w.line}${RESET}`);
     console.log(`  Condition: ${w.condition}`);
     console.log(`  ${YELLOW}Warning: secret values used in if: conditions are visible in GitHub Actions logs.${RESET}`);
     console.log();

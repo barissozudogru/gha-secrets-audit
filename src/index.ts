@@ -5,6 +5,7 @@ import {
   AuditResult,
   DuplicateGroup,
   IfConditionWarning,
+  InlineRunWarning,
   OverExposedSecret,
   SecretMap,
   SecretReference,
@@ -92,6 +93,7 @@ function extractSecretsFromLine(line: string): string[] {
 interface ParseResult {
   secretMap: SecretMap;
   ifConditionWarnings: IfConditionWarning[];
+  inlineRunWarnings: InlineRunWarning[];
 }
 
 function parseWorkflowFile(filePath: string): ParseResult {
@@ -99,6 +101,11 @@ function parseWorkflowFile(filePath: string): ParseResult {
   const lines = content.split('\n');
   const secretMap: SecretMap = {};
   const ifConditionWarnings: IfConditionWarning[] = [];
+  const inlineRunWarnings: InlineRunWarning[] = [];
+
+  // Tracks the run: block currently being read. GitHub expands ${{ }} before
+  // the shell runs, so a secret referenced here ends up as a literal argument.
+  let runBlockIndent: number | null = null;
 
   let currentJob = 'unknown';
   let currentStep = 'unknown';
@@ -144,15 +151,59 @@ function parseWorkflowFile(filePath: string): ParseResult {
       }
     }
 
-    const stepNameMatch = stepNamePattern.exec(line);
-    if (stepNameMatch) {
-      currentStep = stepNameMatch[1].trim();
-    } else if (stepRunPattern.test(line) || stepUsesPattern.test(line)) {
+    // A step starts at a list item ("- name:", "- uses:", "- run:"). Only then
+    // does the index advance and the name reset.
+    //
+    // Previously any uses:/run: line overwrote the name with step-N, so the
+    // common "- name: X" followed by "uses: ... with: apiToken: ${{ secrets.Y }}"
+    // reported the secret against "step-7" instead of X.
+    const startsStep = /^\s*-\s*(name|uses|run):/.test(line);
+    if (startsStep) {
       stepIndex++;
-      currentStep = `step-${stepIndex}`;
+      const named = stepNamePattern.exec(line);
+      currentStep = named ? named[1].trim() : `step-${stepIndex}`;
+    } else {
+      // A name: on a continuation line still belongs to the current step.
+      const stepNameMatch = stepNamePattern.exec(line);
+      if (stepNameMatch && currentStep.startsWith("step-")) {
+        currentStep = stepNameMatch[1].trim();
+      }
     }
 
+    // Maintain run: block state. A block scalar continues while indentation
+    // stays deeper than the run: key itself.
+    const lineIndent = line.length - line.trimStart().length;
+    if (runBlockIndent !== null && line.trim() && lineIndent <= runBlockIndent) {
+      runBlockIndent = null;
+    }
+    const runStart = /^\s*-?\s*run:\s*(.*)$/.exec(line);
+    const startsRunBlock = runStart !== null;
+    if (startsRunBlock) {
+      const rest = runStart[1].trim();
+      // "run: |" or "run: >" opens a block; "run: cmd" is a single line.
+      runBlockIndent = rest === '|' || rest === '>' || rest === '' || rest.startsWith('|') || rest.startsWith('>')
+        ? lineIndent
+        : null;
+    }
+    const insideRun = startsRunBlock || runBlockIndent !== null;
+
     const secrets = extractSecretsFromLine(line);
+
+    // A secret interpolated into the shell command itself, rather than passed
+    // through env:. This is the exposure GitHub's own hardening guidance leads
+    // with, because the expanded value lands in the process table and in any
+    // trace or error output that echoes the command.
+    if (insideRun) {
+      for (const name of secrets) {
+        inlineRunWarnings.push({
+          secretName: name,
+          file: filePath,
+          job: currentJob,
+          step: currentStep,
+          line: lineNumber,
+        });
+      }
+    }
 
     // Detect secrets used in if: conditions — these values appear in GitHub logs
     const ifMatch = ifConditionPattern.exec(line);
@@ -198,7 +249,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
     }
   }
 
-  return { secretMap, ifConditionWarnings };
+  return { secretMap, ifConditionWarnings, inlineRunWarnings };
 }
 
 function mergeSecretMaps(maps: SecretMap[]): SecretMap {
@@ -315,6 +366,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
       secretMap: {},
       overExposedSecrets: [],
       duplicateGroups: [],
+      inlineRunWarnings: [],
       githubTokenUsages: [],
       ifConditionWarnings: [],
       totalUniqueSecrets: 0,
@@ -326,6 +378,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
         duplicateGroupCount: 0,
         githubTokenCount: 0,
         ifConditionWarningCount: 0,
+        inlineRunWarningCount: 0,
         recommendations: ['No workflow files found. Ensure the path points to a .github/workflows directory.'],
       },
     };
@@ -334,6 +387,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
   const perFileResults = files.map((f) => parseWorkflowFile(f));
   const perFileMaps = perFileResults.map((r) => r.secretMap);
   const allIfWarnings = perFileResults.flatMap((r) => r.ifConditionWarnings);
+  const allInlineRunWarnings = perFileResults.flatMap((r) => r.inlineRunWarnings);
 
   let secretMap = mergeSecretMaps(perFileMaps);
 
@@ -358,6 +412,10 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
     (w) => !excludeSet.has(w.secretName.toUpperCase())
   );
 
+  const inlineRunWarnings = allInlineRunWarnings.filter(
+    (w) => !excludeSet.has(w.secretName.toUpperCase())
+  );
+
   const totalReferences = Object.values(secretMap).reduce(
     (sum, u) => sum + u.references.length,
     0
@@ -379,7 +437,13 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
 
   if (ifConditionWarnings.length > 0) {
     recommendations.push(
-      `${ifConditionWarnings.length} secret(s) used in "if:" conditions — these values may be exposed in GitHub Actions logs.`
+      `${ifConditionWarnings.length} secret(s) used in "if:" conditions. These values may be exposed in GitHub Actions logs.`
+    );
+  }
+
+  if (inlineRunWarnings.length > 0) {
+    recommendations.push(
+      `${inlineRunWarnings.length} secret(s) interpolated directly into run: commands. Pass them through env: so the value never reaches the command line.`
     );
   }
 
@@ -405,6 +469,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
     duplicateGroups,
     githubTokenUsages,
     ifConditionWarnings,
+    inlineRunWarnings,
     totalUniqueSecrets: Object.keys(secretMap).length,
     totalReferences,
     summary: {
@@ -414,6 +479,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
       duplicateGroupCount: duplicateGroups.length,
       githubTokenCount: githubTokenUsages.length,
       ifConditionWarningCount: ifConditionWarnings.length,
+      inlineRunWarningCount: inlineRunWarnings.length,
       recommendations,
     },
   };

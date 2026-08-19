@@ -4,7 +4,7 @@ import path from 'path';
 import process from 'process';
 import { createRequire } from 'module';
 import { auditWorkflows } from './index.js';
-import type { AuditResult, IfConditionWarning, OverExposedSecret, DuplicateGroup } from './types.js';
+import type { AuditResult, IfConditionWarning, InlineRunWarning, OverExposedSecret, DuplicateGroup } from './types.js';
 
 // TTY-aware color support: only emit ANSI codes when stdout is a real terminal
 const USE_COLOR = process.stdout.isTTY === true;
@@ -206,10 +206,42 @@ function renderIfConditionWarnings(warnings: IfConditionWarning[]): void {
   }
 }
 
+function renderInlineRunWarnings(warnings: InlineRunWarning[]): void {
+  if (warnings.length === 0) {
+    console.log(`  ${GREEN}None detected.${RESET}`);
+    return;
+  }
+
+  const byFile = new Map<string, InlineRunWarning[]>();
+  for (const w of warnings) {
+    const key = path.basename(w.file);
+    if (!byFile.has(key)) byFile.set(key, []);
+    byFile.get(key)!.push(w);
+  }
+
+  for (const [file, group] of byFile) {
+    console.log(`  ${YELLOW}${BOLD}${file}${RESET}`);
+    for (const w of group) {
+      console.log(`    ${w.secretName}  ${DIM}${w.job} / ${w.step} (line ${w.line})${RESET}`);
+    }
+    console.log();
+  }
+  console.log(
+    `  ${YELLOW}GitHub expands the expression before the shell runs, so the value becomes${RESET}`
+  );
+  console.log(
+    `  ${YELLOW}a literal in the command line. Pass it through env: instead.${RESET}`
+  );
+  console.log();
+}
+
 function renderSummary(result: AuditResult): void {
   const s = result.summary;
   const hasIssues =
-    s.overExposedCount > 0 || s.duplicateGroupCount > 0 || s.ifConditionWarningCount > 0;
+    s.overExposedCount > 0 ||
+    s.duplicateGroupCount > 0 ||
+    s.ifConditionWarningCount > 0 ||
+    s.inlineRunWarningCount > 0;
 
   console.log(`  Workflows scanned  : ${s.workflowsScanned}`);
   console.log(`  Unique secrets     : ${s.uniqueSecrets}`);
@@ -222,6 +254,8 @@ function renderSummary(result: AuditResult): void {
   console.log(`  Over-exposed       : ${overColor}${s.overExposedCount}${RESET}`);
   console.log(`  Duplicate groups   : ${dupColor}${s.duplicateGroupCount}${RESET}`);
   console.log(`  if: cond. warnings : ${ifColor}${s.ifConditionWarningCount}${RESET}`);
+  const inlineColor = s.inlineRunWarningCount > 0 ? YELLOW : GREEN;
+  console.log(`  inline in run:     : ${inlineColor}${s.inlineRunWarningCount}${RESET}`);
   console.log();
 
   console.log(`${BOLD}  Recommendations${RESET}`);
@@ -258,6 +292,12 @@ function renderPretty(result: AuditResult, workflowsDir: string, threshold: numb
   console.log(`${DIM}Secrets referenced in if: conditions are exposed in workflow logs${RESET}`);
   console.log();
   renderIfConditionWarnings(result.ifConditionWarnings);
+
+  console.log();
+  console.log(`${BOLD}SECRETS INTERPOLATED INTO run: COMMANDS${RESET}`);
+  console.log('Expanded before the shell runs, so the value lands in the command line');
+  console.log();
+  renderInlineRunWarnings(result.inlineRunWarnings);
 
   console.log();
   console.log(`${BOLD}HYGIENE SUMMARY${RESET}`);

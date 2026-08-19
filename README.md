@@ -120,7 +120,7 @@ HYGIENE SUMMARY
   Recommendations
   ! Review 2 over-exposed secret(s) and restrict their scope to only the jobs that require them.
   ! Investigate 1 potential duplicate secret group(s) to reduce credential sprawl.
-  ! 1 secret(s) used in "if:" conditions  -  these values may be exposed in GitHub Actions logs.
+  ! 1 secret(s) used in "if:" conditions - these values may be exposed in GitHub Actions logs.
 
 ------------------------------------------------------------------------
 ```

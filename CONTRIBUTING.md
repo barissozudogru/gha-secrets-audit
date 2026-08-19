@@ -26,7 +26,7 @@ npm run build
 # Run the compiled CLI against this repo's own workflows
 node dist/cli.js --path .github/workflows
 
-# Watch mode (if added — currently run build manually)
+# Watch mode (if added  -  currently run build manually)
 npm run build
 ```
 
@@ -34,10 +34,10 @@ npm run build
 
 ```
 src/
-  types.ts     — shared interfaces (SecretReference, AuditResult, etc.)
-  index.ts     — core audit logic (parsing, detection, aggregation)
-  cli.ts       — CLI entry point, argument parsing, terminal rendering
-dist/          — compiled output (do not edit)
+  types.ts      -  shared interfaces (SecretReference, AuditResult, etc.)
+  index.ts      -  core audit logic (parsing, detection, aggregation)
+  cli.ts        -  CLI entry point, argument parsing, terminal rendering
+dist/           -  compiled output (do not edit)
 ```
 
 ## Conventions

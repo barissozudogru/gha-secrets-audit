@@ -145,7 +145,7 @@ jobs:
         run: npx @barissozudogru/gha-secrets-audit --strict
 ```
 
-With `--strict`, the job exits `1` and blocks the PR merge if any over-exposed secrets, duplicate groups, or if-condition warnings are detected.
+With `--strict`, the job exits `1` and blocks the PR merge if any over-exposed secrets, duplicate groups, if-condition warnings, or secrets interpolated into `run:` commands are detected.
 
 To exclude known-acceptable secrets from the check:
 
@@ -159,7 +159,7 @@ To exclude known-acceptable secrets from the check:
 | Code | Condition |
 |------|-----------|
 | `0` | Scan completed successfully with no findings, or `--strict` was not set |
-| `1` | `--strict` is set and at least one finding was detected (over-exposed secret, duplicate group, or if-condition warning) |
+| `1` | `--strict` is set and at least one finding was detected (over-exposed secret, duplicate group, if-condition warning, or secret interpolated into a `run:` command) |
 | `1` | Fatal error: unreadable path, invalid argument, or filesystem failure |
 
 ## License

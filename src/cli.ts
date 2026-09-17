@@ -324,10 +324,14 @@ async function main(): Promise<void> {
   }
 
   if (strict) {
+    // Every category the summary counts as an issue must fail the run here,
+    // otherwise --strict silently passes on the exact exposures it exists
+    // to block in CI.
     const hasFindings =
       result.overExposedSecrets.length > 0 ||
       result.duplicateGroups.length > 0 ||
-      result.ifConditionWarnings.length > 0;
+      result.ifConditionWarnings.length > 0 ||
+      result.inlineRunWarnings.length > 0;
     if (hasFindings) {
       process.exit(1);
     }

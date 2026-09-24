@@ -111,14 +111,15 @@ function parseWorkflowFile(filePath: string): ParseResult {
   let currentStep = 'unknown';
   let stepIndex = 0;
 
-  // Track whether we are inside the top-level `jobs:` block.
+  // Track whether we are inside the top-level `jobs:` block and its indentation level.
   // A line at indent-0 that is NOT `jobs:` resets back to a different top-level key.
   let insideJobsBlock = false;
+  let jobsIndent: number | null = null;
 
-  // A job-ID line is exactly 2-space indent followed by an identifier and colon,
-  // with no other content - and we must already be inside the jobs: block.
+  // A job-ID line is indented beneath `jobs:`, followed by an identifier and colon,
+  // with no other content.
   const topLevelKeyPattern = /^([a-zA-Z0-9_-]+):\s*$/;
-  const jobIdPattern = /^  ([a-zA-Z0-9_-]+):\s*$/;
+  const jobIdPattern = /^(\s+)([a-zA-Z0-9_-]+):\s*$/;
   const stepNamePattern = /^\s+-?\s*name:\s*(.+)$/;
   const stepRunPattern = /^\s+-?\s*run:/;
   const stepUsesPattern = /^\s+-?\s*uses:/;
@@ -132,6 +133,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
     const topLevelMatch = topLevelKeyPattern.exec(line);
     if (topLevelMatch) {
       insideJobsBlock = topLevelMatch[1] === 'jobs';
+      jobsIndent = null;
       // Reset job/step tracking when leaving the jobs block
       if (!insideJobsBlock) {
         currentJob = 'unknown';
@@ -141,13 +143,19 @@ function parseWorkflowFile(filePath: string): ParseResult {
       continue;
     }
 
-    // Only match job IDs when inside the jobs: block
+    // Match job IDs when inside the jobs: block
     if (insideJobsBlock) {
       const jobMatch = jobIdPattern.exec(line);
       if (jobMatch) {
-        currentJob = jobMatch[1];
-        stepIndex = 0;
-        currentStep = 'unknown';
+        const indent = jobMatch[1].length;
+        if (jobsIndent === null) {
+          jobsIndent = indent;
+        }
+        if (indent === jobsIndent) {
+          currentJob = jobMatch[2];
+          stepIndex = 0;
+          currentStep = 'unknown';
+        }
       }
     }
 

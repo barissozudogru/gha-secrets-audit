@@ -1,5 +1,10 @@
 # gha-secrets-audit
 
+[![npm version](https://img.shields.io/npm/v/@barissozudogru/gha-secrets-audit)](https://www.npmjs.com/package/@barissozudogru/gha-secrets-audit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue)](./LICENSE)
+
+[npm](https://www.npmjs.com/package/@barissozudogru/gha-secrets-audit) · [Source](https://github.com/barissozudogru/gha-secrets-audit) · [Issues](https://github.com/barissozudogru/gha-secrets-audit/issues)
+
 Static analysis tool for GitHub Actions workflow files to inspect secret usage and detect hygiene issues. It runs entirely offline without reading secret values or making network calls.
 
 
@@ -17,9 +22,10 @@ npm install -g @barissozudogru/gha-secrets-audit
 
 The scanner maps every secret reference across workflow files by file, job, step, and line number, checking for:
 
-- **Over-exposed secrets**: Credentials referenced in 3 or more jobs (configurable via `--threshold`), violating least-privilege design.
-- **If-condition leaks**: Secrets referenced inside `if:` conditions, which GitHub Actions evaluates and prints in workflow execution logs.
-- **Duplicate secret patterns**: Near-duplicate or base-name matched secret names that suggest credential duplication or inconsistent naming conventions.
+- **Over-exposed secrets**: Credentials referenced in 3 or more jobs (configurable via `--threshold`). Review whether each job needs access.
+- **Unsupported conditions**: Direct secret references inside `if:` conditions. [GitHub does not support this syntax](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
+- **Name similarity**: Near-duplicate or base-name matched secret names that warrant review. Names alone do not establish duplicate values or credentials.
+- **Shell interpolation**: Secret expressions embedded directly in `run:` commands; review quoting and use environment variables where appropriate.
 
 
 ## Usage
@@ -59,71 +65,16 @@ gha-secrets-audit --path ./workflows --threshold 5 --exclude GITHUB_TOKEN --stri
 | `--version` | `-v` | | Print the installed version |
 | `--help` | `-h` | | Show help text |
 
-## Example Output
+## Output and limits
 
-```
-gha-secrets-audit
-Scanning: /repo/.github/workflows
-------------------------------------------------------------------------
+The report lists referenced secret names and their locations, followed by review
+findings and a summary. `--json` provides structured results for automation.
 
-REFERENCED SECRETS
-  SECRET NAME              REFS  JOBS  FILES  NOTE
-  -------------------------------------------------------
-  AWS_ACCESS_KEY_ID           5     5      3
-  AWS_SECRET_ACCESS_KEY       5     5      3
-  DEPLOY_SSH_KEY              2     2      1
-  GITHUB_TOKEN                3     3      2  (standard)
-  NPM_TOKEN                   1     1      1
-  SLACK_WEBHOOK               4     4      2
-
-OVER-EXPOSED SECRETS
-Secrets used in 3+ jobs may violate least-privilege principle
-
-  AWS_ACCESS_KEY_ID
-  Referenced in 5 job(s) across 3 file(s)
-  Secret "AWS_ACCESS_KEY_ID" is referenced in 5 jobs across 3 workflow(s).
-  Consider scoping it to only the jobs that require it, or splitting into
-  more specific secrets per integration.
-    deploy.yml
-      build / step-1 (line 34)
-      publish / step-2 (line 67)
-    release.yml
-      release / step-1 (line 22)
-
-  SLACK_WEBHOOK
-  Referenced in 4 job(s) across 2 file(s)
-  ...
-
-IF-CONDITION SECRET USAGE
-
-  AWS_SECRET_ACCESS_KEY
-  deploy.yml - job: validate, line 41
-  Condition: ${{ secrets.AWS_SECRET_ACCESS_KEY != '' }}
-  Warning: secret values used in if: conditions are visible in GitHub Actions logs.
-
-DUPLICATE PATTERNS
-Secrets with similar names may be redundant or inconsistently named
-
-  [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
-  These secrets share the base name "AWS" and may represent the same
-  credential under different naming conventions, or could be consolidated.
-
-HYGIENE SUMMARY
-
-  Workflows scanned  : 3
-  Unique secrets     : 6
-  GITHUB_TOKEN refs  : 3
-  Over-exposed       : 2
-  Duplicate groups   : 1
-  if: cond. warnings : 1
-
-  Recommendations
-  ! Review 2 over-exposed secret(s) and restrict their scope to only the jobs that require them.
-  ! Investigate 1 potential duplicate secret group(s) to reduce credential sprawl.
-  ! 1 secret(s) used in "if:" conditions - these values may be exposed in GitHub Actions logs.
-
-------------------------------------------------------------------------
-```
+Findings are static review hints. The scanner cannot inspect secret values,
+repository permissions, environment protections, or execution logs. A finding does
+not prove exposure, and a clean report does not establish that a workflow is secure.
+Review intentional reuse before enforcing `--strict`; use `--exclude` for accepted
+exceptions.
 
 ## CI Integration
 
@@ -145,7 +96,7 @@ jobs:
         run: npx @barissozudogru/gha-secrets-audit --strict
 ```
 
-With `--strict`, the job exits `1` and blocks the PR merge if any over-exposed secrets, duplicate groups, if-condition warnings, or secrets interpolated into `run:` commands are detected.
+With `--strict`, the job exits `1` when any finding is detected. Configure the job as a required status check if you want it to gate pull request merges.
 
 To exclude known-acceptable secrets from the check:
 
@@ -161,6 +112,20 @@ To exclude known-acceptable secrets from the check:
 | `0` | Scan completed successfully with no findings, or `--strict` was not set |
 | `1` | `--strict` is set and at least one finding was detected (over-exposed secret, duplicate group, if-condition warning, or secret interpolated into a `run:` command) |
 | `1` | Fatal error: unreadable path, invalid argument, or filesystem failure |
+
+## Development and support
+
+Report problems through [GitHub issues](https://github.com/barissozudogru/gha-secrets-audit/issues). See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution workflow. For vulnerabilities, follow [SECURITY.md](./SECURITY.md).
+
+To build and test a source checkout with Node.js 22:
+
+```bash
+npm ci
+npm test
+npm run build
+```
+
+The default branch can contain changes that have not yet been published to npm.
 
 ## License
 

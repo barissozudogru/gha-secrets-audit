@@ -213,7 +213,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
       }
     }
 
-    // Detect secrets used in if: conditions - these values appear in GitHub logs
+    // GitHub Actions does not support direct secret references in if: conditions.
     const ifMatch = ifConditionPattern.exec(line);
     if (ifMatch) {
       const condition = ifMatch[1].trim();
@@ -330,7 +330,7 @@ function detectDuplicateGroups(secretMap: SecretMap): DuplicateGroup[] {
     if (members.length > 1 && !members.every((m) => grouped.has(m))) {
       groups.push({
         names: members,
-        reason: `These secrets share the base name "${base}" and may represent the same credential under different naming conventions, or could be consolidated.`,
+        reason: `These secrets share the base name "${base}". Review their purpose and naming; name similarity does not establish that their values or credentials are duplicates.`,
       });
       for (const m of members) grouped.add(m);
     }
@@ -445,7 +445,7 @@ export function auditWorkflows(options: AuditOptions): AuditResult {
 
   if (ifConditionWarnings.length > 0) {
     recommendations.push(
-      `${ifConditionWarnings.length} secret(s) used in "if:" conditions. These values may be exposed in GitHub Actions logs.`
+      `${ifConditionWarnings.length} secret(s) used directly in "if:" conditions. GitHub Actions does not support direct secret references in these conditions.`
     );
   }
 

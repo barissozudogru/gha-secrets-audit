@@ -201,7 +201,7 @@ function renderIfConditionWarnings(warnings: IfConditionWarning[]): void {
     console.log(`  ${YELLOW}${BOLD}${w.secretName}${RESET}`);
     console.log(`  ${DIM}${path.basename(w.file)} - job: ${w.job}, line ${w.line}${RESET}`);
     console.log(`  Condition: ${w.condition}`);
-    console.log(`  ${YELLOW}Warning: secret values used in if: conditions are visible in GitHub Actions logs.${RESET}`);
+    console.log(`  ${YELLOW}Warning: GitHub Actions does not support direct secret references in if: conditions.${RESET}`);
     console.log();
   }
 }
@@ -289,7 +289,7 @@ function renderPretty(result: AuditResult, workflowsDir: string, threshold: numb
 
   console.log();
   console.log(`${BOLD}IF-CONDITION SECRET USAGE${RESET}`);
-  console.log(`${DIM}Secrets referenced in if: conditions are exposed in workflow logs${RESET}`);
+  console.log(`${DIM}Direct secret references in if: conditions are unsupported by GitHub Actions${RESET}`);
   console.log();
   renderIfConditionWarnings(result.ifConditionWarnings);
 

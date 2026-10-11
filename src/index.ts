@@ -106,6 +106,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
   // Tracks the run: block currently being read. GitHub expands ${{ }} before
   // the shell runs, so a secret referenced here ends up as a literal argument.
   let runBlockIndent: number | null = null;
+  let ifBlockIndent: number | null = null;
 
   let currentJob = 'unknown';
   let currentStep = 'unknown';
@@ -123,7 +124,7 @@ function parseWorkflowFile(filePath: string): ParseResult {
   const stepNamePattern = /^\s+-?\s*name:\s*(.+)$/;
   const stepRunPattern = /^\s+-?\s*run:/;
   const stepUsesPattern = /^\s+-?\s*uses:/;
-  const ifConditionPattern = /^\s+if:\s*(.+)$/;
+  const ifConditionPattern = /^\s+-?\s*if:\s*(.*)$/;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -159,13 +160,13 @@ function parseWorkflowFile(filePath: string): ParseResult {
       }
     }
 
-    // A step starts at a list item ("- name:", "- uses:", "- run:"). Only then
+    // A step starts at a list item ("- name:", "- uses:", "- run:", "- if:"). Only then
     // does the index advance and the name reset.
     //
     // Previously any uses:/run: line overwrote the name with step-N, so the
     // common "- name: X" followed by "uses: ... with: apiToken: ${{ secrets.Y }}"
     // reported the secret against "step-7" instead of X.
-    const startsStep = /^\s*-\s*(name|uses|run):/.test(line);
+    const startsStep = /^\s*-\s*(name|uses|run|if):/.test(line);
     if (startsStep) {
       stepIndex++;
       const named = stepNamePattern.exec(line);
@@ -195,6 +196,26 @@ function parseWorkflowFile(filePath: string): ParseResult {
     }
     const insideRun = startsRunBlock || runBlockIndent !== null;
 
+    // Maintain if: block state. Multi-line conditions can be written with block
+    // scalars like `if: >` or `if: |` or plain indented multiline expressions.
+    if (ifBlockIndent !== null && line.trim() && lineIndent <= ifBlockIndent) {
+      ifBlockIndent = null;
+    }
+    const ifStart = ifConditionPattern.exec(line);
+    const startsIfBlock = ifStart !== null;
+    if (startsIfBlock) {
+      const rest = ifStart[1].trim();
+      // "if: |" or "if: >" opens a block; empty condition also opens a block.
+      // If condition content follows immediately on the same line, check if it's
+      // just the scalar indicator or actual expression content.
+      if (rest === '|' || rest === '>' || rest === '' || rest.startsWith('|') || rest.startsWith('>')) {
+        ifBlockIndent = lineIndent;
+      } else {
+        ifBlockIndent = null;
+      }
+    }
+    const insideIf = startsIfBlock || ifBlockIndent !== null;
+
     const secrets = extractSecretsFromLine(line);
 
     // A secret interpolated into the shell command itself, rather than passed
@@ -214,23 +235,26 @@ function parseWorkflowFile(filePath: string): ParseResult {
     }
 
     // GitHub Actions does not support direct secret references in if: conditions.
-    const ifMatch = ifConditionPattern.exec(line);
-    if (ifMatch) {
-      const condition = ifMatch[1].trim();
-      const bodies = extractExpressionBodies(condition);
-      // If no ${{ }}, the condition may still reference context directly (bare expression)
-      const segmentsToCheck = bodies.length > 0 ? bodies : [condition];
-      for (const seg of segmentsToCheck) {
-        const secretsInCond = extractSecretsFromSegment(seg);
-        for (const name of secretsInCond) {
-          ifConditionWarnings.push({
-            secretName: name,
-            file: filePath,
-            job: currentJob,
-            line: lineNumber,
-            condition,
-          });
-          secrets.push(name);
+    if (insideIf) {
+      const rawCondition = startsIfBlock ? ifStart[1].trim() : line.trim();
+      // Ignore scalar indicators when checking for condition content
+      const condition = (rawCondition === '|' || rawCondition === '>') ? '' : rawCondition;
+      if (condition) {
+        const bodies = extractExpressionBodies(condition);
+        // If no ${{ }}, the condition may still reference context directly (bare expression)
+        const segmentsToCheck = bodies.length > 0 ? bodies : [condition];
+        for (const seg of segmentsToCheck) {
+          const secretsInCond = extractSecretsFromSegment(seg);
+          for (const name of secretsInCond) {
+            ifConditionWarnings.push({
+              secretName: name,
+              file: filePath,
+              job: currentJob,
+              line: lineNumber,
+              condition,
+            });
+            secrets.push(name);
+          }
         }
       }
     }
